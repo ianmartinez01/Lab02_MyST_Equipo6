@@ -1,7 +1,8 @@
 """Carga, validación y auditoría de los datos de NVDA a 5 minutos.
 
 Fuente: velas públicas de Binance Stocks (NVDA, ajustadas). La descarga se hace
-una sola vez y se congela en data/; el resto del proyecto solo lee el CSV.
+una sola vez con `python -m src.data` y se congela en data/nvda_5m.csv;
+el resto del proyecto solo lee el CSV.
 """
 
 import json
@@ -11,57 +12,52 @@ from pathlib import Path
 
 import pandas as pd
 
-URL_VELAS = (
-    "https://www.binance.com/bapi/equity/v1/public/equity/kline/chart"
-    "?symbol=NVDA&adjustmentMode=ADJUSTED&timeframe=5T&limit=1000"
-)
-RUTA_CRUDOS = Path(__file__).resolve().parents[1] / "data" / "nvda_5m_crudo.csv"
+URL_VELAS = "https://www.binance.com/bapi/equity/v1/public/equity/kline/chart"
+INTERVALOS = {"1m": "1T", "5m": "5T", "1h": "1H", "4h": "4H", "1d": "1D"}
+RUTA_CRUDOS = Path(__file__).resolve().parents[1] / "data" / "nvda_5m.csv"
 ZONA = "America/New_York"
 INICIO_RTH, FIN_RTH = "09:30", "15:55"   # última vela de 5 min abre a las 15:55
 FIN_TRAIN = "2026-06-30"
 
 
-def descargar_velas(desde: str = "2026-01-01", pausa: float = 0.3) -> pd.DataFrame:
-    """Descarga todas las velas de 5 min hacia atrás hasta `desde`, paginando con endTime."""
-    limite = pd.Timestamp(desde, tz="UTC").value // 10**6
-    filas, fin = [], None
-    while True:
-        url = URL_VELAS + (f"&endTime={fin}" if fin else "")
-        with urllib.request.urlopen(url, timeout=30) as r:
+def descargar(ticker: str = "NVDA", start: str = "2026-01-01", end: str = "2026-09-26",
+              interval: str = "5m", pausa: float = 0.3) -> pd.DataFrame:
+    """Descarga velas OHLCV con la misma interfaz y el mismo formato que yf.download.
+
+    Yahoo Finance solo guarda 60 días de velas de 5 minutos, así que se usa el histórico
+    público de Binance Stocks (precios ajustados). Pagina hacia atrás de 1000 en 1000 velas.
+    """
+    inicio = pd.Timestamp(start, tz=ZONA).value // 10**6
+    fin = pd.Timestamp(end, tz=ZONA).value // 10**6
+    base = f"{URL_VELAS}?symbol={ticker}&adjustmentMode=ADJUSTED&timeframe={INTERVALOS[interval]}&limit=1000"
+    filas, corte = [], fin - 1
+    while corte >= inicio:
+        with urllib.request.urlopen(f"{base}&endTime={corte}", timeout=30) as r:
             velas = json.load(r)["data"]["bars"]
         if not velas:
             break
         filas.extend(velas)
-        fin = velas[0]["t"] - 1
-        if velas[0]["t"] <= limite:
-            break
+        corte = velas[0]["t"] - 1
         time.sleep(pausa)
-    df = pd.DataFrame(filas).drop_duplicates("t").sort_values("t")
-    df = df[df["t"] >= limite]
-    return pd.DataFrame({
-        "timestamp_ms": df["t"].astype("int64"),
-        "Open": df["o"].astype(float),
-        "High": df["h"].astype(float),
-        "Low": df["l"].astype(float),
-        "Close": df["c"].astype(float),
-        "Volume": df["v"].astype(float),
-    }).reset_index(drop=True)
+    crudo = pd.DataFrame(filas).drop_duplicates("t").sort_values("t")
+    crudo = crudo[(crudo["t"] >= inicio) & (crudo["t"] < fin)]
+    df = crudo[["o", "h", "l", "c", "v"]].astype(float)
+    df.columns = ["Open", "High", "Low", "Close", "Volume"]
+    df.index = pd.to_datetime(crudo["t"], unit="ms", utc=True).dt.tz_convert(ZONA)
+    df.index.name = "Datetime"
+    return df
 
 
-def congelar_datos(ruta: Path = RUTA_CRUDOS, hasta: str | None = None) -> Path:
-    """Descarga y guarda el CSV crudo. Solo se usa para regenerar data/; main.py no descarga."""
-    df = descargar_velas()
-    if hasta:
-        df = df[df["timestamp_ms"] < pd.Timestamp(hasta, tz=ZONA).value // 10**6]
-    df.to_csv(ruta, index=False)
+def congelar_datos(ruta: Path = RUTA_CRUDOS, **kwargs) -> Path:
+    """Descarga con `descargar` y guarda el CSV que usa todo el proyecto."""
+    descargar(**kwargs).to_csv(ruta)
     return ruta
 
 
 def cargar_datos(ruta: Path = RUTA_CRUDOS, solo_rth: bool = True) -> pd.DataFrame:
-    """Lee el CSV congelado con índice en hora de Nueva York; opcionalmente filtra a sesión regular."""
-    df = pd.read_csv(ruta)
-    df.index = pd.to_datetime(df.pop("timestamp_ms"), unit="ms", utc=True).dt.tz_convert(ZONA)
-    df.index.name = "fecha"
+    """Lee el CSV congelado como en clase; opcionalmente filtra a la sesión regular."""
+    df = pd.read_csv(ruta, index_col="Datetime")
+    df.index = pd.to_datetime(df.index, utc=True).tz_convert(ZONA)
     if solo_rth:
         df = df.between_time(INICIO_RTH, FIN_RTH)
     return df
@@ -98,9 +94,12 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Descarga y congela las velas de NVDA a 5 min en data/.")
-    parser.add_argument("--hasta", default="2026-09-26", help="fecha de corte exclusiva (hora de Nueva York)")
+    parser.add_argument("--ticker", default="NVDA")
+    parser.add_argument("--start", default="2026-01-01")
+    parser.add_argument("--end", default="2026-09-26", help="fecha final exclusiva (hora de Nueva York)")
+    parser.add_argument("--interval", default="5m", choices=sorted(INTERVALOS))
     args = parser.parse_args()
-    ruta = congelar_datos(hasta=args.hasta)
+    ruta = congelar_datos(ticker=args.ticker, start=args.start, end=args.end, interval=args.interval)
     print(f"Datos guardados en {ruta}")
     for clave, valor in auditar_datos(cargar_datos(ruta)).items():
         print(f"  {clave}: {valor}")
