@@ -92,3 +92,35 @@ def tablas_retornos(valor: pd.Series) -> dict:
     """Tablas de retornos mensuales, trimestrales y anuales."""
     return {nombre: tabla_retornos(valor, f) for nombre, f in
             (("mensual", "ME"), ("trimestral", "QE"), ("anual", "YE"))}
+
+
+def metricas_por_regimen(valor: pd.Series, operaciones: pd.DataFrame, etiquetas: pd.Series) -> pd.DataFrame:
+    """Métricas de la estrategia separadas por el régimen vigente (velas) y de entrada (operaciones)."""
+    r = retornos(valor)
+    reg = etiquetas.reindex(r.index)
+    filas = {}
+    for nombre, grupo in r.groupby(reg):
+        ops = operaciones[operaciones.get("regimen") == nombre] if "regimen" in operaciones else pd.DataFrame()
+        sd, sd_neg = grupo.std(), np.sqrt((np.minimum(grupo, 0) ** 2).mean())
+        filas[nombre] = {
+            "proporcion_tiempo": len(grupo) / len(r),
+            "retorno_acumulado": float((1 + grupo).prod() - 1),
+            "sharpe": grupo.mean() / sd * np.sqrt(VELAS_POR_ANIO) if sd > 0 else np.nan,
+            "sortino": grupo.mean() / sd_neg * np.sqrt(VELAS_POR_ANIO) if sd_neg > 0 else np.nan,
+            "operaciones": len(ops),
+            "win_rate": win_rate(ops),
+            "pnl": float(ops["pnl"].sum()) if len(ops) else 0.0,
+        }
+    return pd.DataFrame(filas).T
+
+
+def prueba_diferencia_regimenes(operaciones: pd.DataFrame) -> dict:
+    """Kruskal-Wallis sobre el retorno por operación entre regímenes (H0: misma distribución)."""
+    from scipy.stats import kruskal
+
+    ret = operaciones["pnl"] / (operaciones["acciones"] * operaciones["precio_entrada"])
+    grupos = [g.to_numpy() for _, g in ret.groupby(operaciones["regimen"]) if len(g) >= 3]
+    if len(grupos) < 2:
+        return {"estadistico": np.nan, "p_valor": np.nan, "grupos": len(grupos)}
+    h, p = kruskal(*grupos)
+    return {"estadistico": float(h), "p_valor": float(p), "grupos": len(grupos)}
