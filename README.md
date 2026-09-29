@@ -37,6 +37,7 @@ Lab02_MyST_Equipo6/
 │   └── analysis.ipynb
 └── docs/
     ├── figures/
+    ├── theta_congelado.json
     ├── reporte.pdf
     └── presentacion.pdf
 ```
@@ -53,13 +54,21 @@ python -m pip install -r requirements.txt
 
 ## Reproducción de resultados
 
-Para ejecutar el proyecto completo (datos, regímenes, walk-forward, modelo final, robustez y figuras) con un solo comando:
+Para ejecutar el proyecto completo (datos, modelo final, regímenes, walk-forward anchored y rolling, validation, robustez y figuras) con un solo comando:
 
 ```bash
 python main.py
 ```
 
-El walk-forward corre en paralelo en todos los núcleos disponibles y el proyecto completo tarda entre 7 y 12 minutos según la carga de la máquina. Las figuras se guardan en `docs/figures/` y las tablas en `resultados/`.
+El walk-forward corre en paralelo en todos los núcleos disponibles y el proyecto completo tarda alrededor de 15 a 20 minutos. Las figuras se guardan en `docs/figures/` y las tablas en `resultados/`.
+
+θ* se calcula solo con train + test y se congela en `docs/theta_congelado.json` antes de evaluar validation. Para recalcularlo sin tocar validation:
+
+```bash
+python main.py --congelar
+```
+
+`python main.py` lee ese archivo, verifica que coincide con el recalculado y evalúa validation una sola vez.
 
 Para ejecutar las pruebas automáticas:
 
@@ -73,7 +82,7 @@ Los datos ya están congelados en `data/nvda_5m.csv`. Para volver a descargarlos
 python -m src.data --ticker NVDA --start 2026-01-01 --end 2026-09-26 --interval 5m
 ```
 
-La semilla aleatoria utilizada es `42`, definida en `main.py` y en `src/optimize.py`. Cada estudio de Optuna usa un `TPESampler` con semilla `42 + desplazamiento` por ventana y régimen, y K-means usa `random_state=42`, por lo que los resultados son reproducibles.
+La semilla aleatoria utilizada es `42`, definida en `main.py` y en `src/optimize.py`. Cada estudio de Optuna usa `TPESampler` o `RandomSampler` con semilla `42 + desplazamiento` por ventana y régimen, y K-means usa `random_state=42`, por lo que los resultados son reproducibles.
 
 ## Datos
 
@@ -82,8 +91,9 @@ La semilla aleatoria utilizada es `42`, definida en `main.py` y en `src/optimize
 | Activo | NVDA (NVIDIA Corporation) |
 | Fuente | Histórico público de velas de Binance Stocks, precios ajustados |
 | Frecuencia | 5 minutos, sesión regular 09:30–16:00 ET (78 velas por día) |
-| Train | 2 de enero a 30 de junio de 2026 (9,594 velas) |
-| Test | 1 de julio a 25 de septiembre de 2026 (4,758 velas) |
+| Train | 2 de enero a 29 de mayo de 2026 (7,956 velas, 55%) |
+| Test | 1 de junio a 31 de julio de 2026 (3,354 velas, 23%) |
+| Validation | 3 de agosto a 25 de septiembre de 2026 (3,042 velas, 21%) |
 | Auditoría | 0 duplicados, 0 nulos, 0 velas con OHLC incoherente, 0 días incompletos |
 
 Yahoo Finance solo conserva 60 días de velas de 5 minutos, por eso la descarga usa el histórico de Binance Stocks.
@@ -113,43 +123,67 @@ La señal se calcula con información hasta el cierre de la vela t y la orden se
 | Stop-loss y take-profit en la misma vela | Se ejecuta primero el stop-loss |
 | Cierre | Toda posición se cierra en la última vela de la sesión |
 | Entradas | No se abren posiciones en los primeros ni en los últimos 15 minutos |
+| Spread | Medio spread de $0.005 por acción en cada entrada y salida |
+| Impacto de mercado | Ley de raíz cuadrada: σ_diaria × √(acciones / volumen diario promedio de 20 sesiones) |
 | Anualización | 78 velas × 252 sesiones = 19,656 velas por año, tasa libre de riesgo 0 |
 
 ## Detección de régimen
 
-K-means (k = 3) sobre ln(volatilidad realizada) y √(eficiencia de Kaufman), calculadas en una ventana móvil de 1 semana (390 velas) y actualizadas cada 4 horas de sesión (48 velas). Crisis es el grupo de mayor volatilidad; de los otros dos, tendencia es el de mayor eficiencia y reversión el restante. Al cambiar el régimen, la posición abierta se cierra en la apertura siguiente.
+K-means (k = 3) sobre ln(volatilidad realizada) y √(eficiencia de Kaufman), calculadas en una ventana móvil de 1 semana (390 velas) y actualizadas cada 4 horas de sesión (48 velas). Crisis es el grupo de mayor volatilidad; de los otros dos, tendencia es el de mayor eficiencia y reversión el restante. Al cambiar el régimen, la posición abierta se cierra en la apertura siguiente. El modelo final se ajusta con train + test.
 
-| Métrica | Train | Test | Objetivo |
-|---|---:|---:|---:|
-| Silhouette | 0.400 | 0.374 | > 0.4 |
-| Duración media del régimen (horas de sesión) | 13.4 | 15.3 | > 12 |
-| Transiciones por semana | 2.4 | 2.0 | |
-| Tiempo en tendencia / reversión / crisis | 22% / 33% / 45% | 34% / 34% / 31% | |
+| Métrica | Train | Test | Validation | Objetivo |
+|---|---:|---:|---:|---:|
+| Silhouette | 0.376 | 0.470 | 0.410 | > 0.4 |
+| Duración media del régimen (horas de sesión) | 13.3 | 17.5 | 16.9 | > 12 |
+| Transiciones por semana | 2.4 | 1.7 | 1.8 | |
+| Tiempo en tendencia / reversión / crisis | 32% / 30% / 38% | 13% / 46% / 41% | 46% / 19% / 35% | |
 
-## Optimización y walk-forward
+## Optimización
 
 | Elemento | Valor |
 |---|---|
-| Método | Optuna, TPE, maximizando el Calmar Ratio |
-| Pruebas | 150 por régimen por ventana (la primera es la configuración base) |
-| Operaciones mínimas | 5 por régimen por ventana; si no se cumplen, Calmar = −10 |
-| Régimen apagado | Si su mejor Calmar en la ventana no es positivo, no se opera en ese régimen |
-| Ventanas | 21 (entrenamiento 1 mes, prueba 1 semana, paso semanal) |
-| Configuraciones evaluadas | 8,700 |
-| Tiempo de optimización | 370 s en paralelo (8 núcleos) |
-| Modelo final | K-means con todo train y Optuna por régimen en junio; se evalúa sin cambios en test |
+| Objetivo | θ* = argmax Calmar(backtest(θ)) con comisión, spread e impacto |
+| Espacio de búsqueda | 11 parámetros por régimen, con rango y justificación en `RANGOS` de `src/optimize.py` |
+| Restricción | Menos de 10 operaciones por régimen en la ventana (≈ 30 por ventana) → Calmar = −10 |
+| Selección de θ* | Centro de la mejor meseta: trial cuyo vecindario de 10 trials tiene el Calmar promedio más alto |
+| Régimen apagado | Si su mejor Calmar no es positivo, no se opera en ese régimen |
+| Modelo final (julio) | Random search N = 200 y TPE N = 200 por régimen |
+
+| Régimen | Mejor Calmar random search | Mejor Calmar TPE | Calmar de la meseta | θ* | Estado |
+|---|---:|---:|---:|---|---|
+| Tendencia | −0.06 | −2.56 | −3.19 | meseta | apagado |
+| Reversión | 13.90 | 59.38 | 56.71 | meseta | activo |
+| Crisis | −4.63 | 11.68 | 8.72 | meseta | activo |
+
+En los tres regímenes el argmax del TPE está aislado de sus vecinos, así que θ* se tomó del centro de la meseta. Las dos dimensiones más importantes (fANOVA) definen la superficie 3D de cada régimen; por ejemplo, fracción del capital y ventana de Bollinger en reversión.
+
+θ* quedó congelado en `docs/theta_congelado.json` en el commit `9a11fab6634e00a0848a1defbce71a36763eead9`, antes de evaluar validation.
+
+## Walk-forward
+
+Entrenamiento de 1 mes (rolling) o desde el inicio (anchored), prueba de 1 semana, paso semanal, sobre train + test. Purga: señales y variables de régimen solo miran hacia atrás y toda posición se cierra el mismo día, por lo que ninguna observación de entrenamiento usa datos de la prueba. Embargo: se descarta la última sesión (78 velas) antes de cada semana de prueba.
+
+| Variante | Ventanas | Configuraciones | Tiempo | Anualizado dentro | Anualizado fuera | Walk-forward efficiency |
+|---|---:|---:|---:|---:|---:|---:|
+| Rolling (1 mes) | 25 | 10,350 | 315 s | 55.37% | −45.48% | −0.82 |
+| Anchored | 25 | 11,250 | 404 s | 28.47% | −23.60% | −0.83 |
 
 ## Resultados
 
-| Métrica | Train (walk-forward) | Buy & hold train | Test | Buy & hold test |
-|---|---:|---:|---:|---:|
-| Retorno total | −21.56% | 6.65% | −8.14% | 16.24% |
-| Sharpe | −6.45 | 0.63 | −4.79 | 1.92 |
-| Sortino | −8.21 | 0.91 | −6.10 | 2.90 |
-| Calmar | −2.11 | 0.94 | −3.27 | 7.63 |
-| Máximo drawdown | −22.05% | −19.25% | −9.06% | −11.30% |
-| Win Rate | 21.8% | | 29.2% | |
-| Operaciones | 87 | | 24 | |
+Train y test son las semanas fuera de muestra del walk-forward rolling en cada periodo; validation es θ* congelado evaluado una sola vez.
+
+| Métrica | Train (WF) | B&H train | Test (WF) | B&H test | Validation | B&H validation |
+|---|---:|---:|---:|---:|---:|---:|
+| Retorno total | −15.31% | 12.73% | −11.55% | −7.88% | −7.23% | 12.84% |
+| Rendimiento anualizado | −41.95% | 48.04% | −51.29% | −38.18% | −38.42% | 118.28% |
+| Volatilidad anualizada | 6.98% | 35.99% | 9.86% | 38.32% | 6.51% | 35.20% |
+| Sharpe | −7.75 | 1.27 | −7.24 | −1.06 | −7.41 | 2.39 |
+| Sortino | −9.65 | 1.83 | −9.01 | −1.44 | −9.49 | 3.84 |
+| Calmar | −2.64 | 2.86 | −3.87 | −2.14 | −5.32 | 10.91 |
+| Máximo drawdown | −15.88% | −16.81% | −13.25% | −17.88% | −7.23% | −10.84% |
+| Win Rate | 23.4% | | 19.4% | | 35.3% | |
+| Payoff ratio | 0.59 | | 1.12 | | 0.48 | |
+| Operaciones | 64 | | 31 | | 34 | |
 
 Las tablas de retornos mensuales, trimestrales y anuales están en `docs/figures/04_tabla_retornos.png`.
 
@@ -157,32 +191,32 @@ Las tablas de retornos mensuales, trimestrales y anuales están en `docs/figures
 
 ### 1. ¿Qué aporta la regla de confirmación de 2 de 3 frente a usar un solo indicador?
 
-En test, con los parámetros finales, la regla 2 de 3 abrió 24 operaciones con Calmar −3.27. Usar solo el momento (RSI o Estocástico) abrió 49 con Calmar −3.04 y retorno −17.29%, y solo el MACD abrió 62 con Calmar −2.80. La confirmación reduce las operaciones a la mitad o menos y con ello el costo total en comisiones, pero no mejora el Calmar: todas las variantes pierden. La versión estricta (los tres votos) solo abrió 2 operaciones.
+En validation, con θ* congelado, la regla 2 de 3 abrió 34 operaciones con Calmar −5.32. Solo Bollinger abrió 44 (Calmar −4.84), solo momento 48 (−4.86) y solo MACD 31 (−5.40). La confirmación filtra operaciones frente a Bollinger y momento, pero no mejora el Calmar: todas las variantes pierden. La versión estricta (los tres votos) abrió 24 con Calmar −3.88, la menos mala porque opera menos.
 
 ### 2. ¿Cuánto se degrada el desempeño entre entrenamiento y prueba en el walk-forward?
 
-El Calmar mediano dentro de muestra fue 85.28 y fuera de muestra −18.82. El retorno medio de la ventana de entrenamiento fue +6.38% en un mes y el de la semana de prueba −1.14%; solo 4 de 21 semanas fueron positivas. No sobrevive ninguna proporción de la ventaja: el desempeño dentro de muestra es ajuste a la muestra histórica.
+El rendimiento anualizado pasa de 55.37% dentro de muestra a −45.48% fuera en rolling (walk-forward efficiency −0.82) y de 28.47% a −23.60% en anchored (−0.83). El Calmar mediano cae de 20.53 a −23.40 y solo 2 de 25 semanas fueron positivas. Una eficiencia negativa significa que no sobrevive nada de la ventaja: el resultado dentro de muestra es ruido ajustado. Anchored pierde menos (−12.0% contra −25.1% acumulado) porque su ventana más larga cambia menos los parámetros entre semanas, pero la eficiencia es igual, así que no hay un edge estable que se degrade con el tiempo.
 
 ### 3. ¿Qué tan sensible es la estrategia a una variación de ±20% en sus parámetros?
 
-El Calmar en test se mueve entre −2.92 y −3.46 al variar cualquier parámetro ±20%. Es una meseta, no un pico aislado, pero es una meseta de pérdidas: ninguna variación local vuelve rentable a la estrategia.
+En validation el Calmar se mueve entre −5.53 y −5.12 al variar cualquier parámetro ±20%. Es una meseta, no un pico aislado, pero es una meseta de pérdidas. En la optimización de julio, en cambio, los slice plots muestran el argmax separado de sus vecinos en los tres regímenes, por lo que θ* se tomó del centro de la meseta.
 
 ### 4. ¿A qué nivel de costo deja de ser rentable?
 
-La estrategia no es rentable en ningún nivel de costo: aun con comisión cero pierde 2.98% en test. Con la comisión del laboratorio (0.125%) pierde 8.14%, así que las comisiones explican unos 5 puntos de la pérdida y la selección de entradas los otros 3. No hay margen de seguridad frente al 0.125%.
+La estrategia no es rentable en ningún nivel de costo: con comisión cero pierde 2.51% en validation y con 0.125% pierde 7.23%. En validation las comisiones sumaron $47,851 y el spread con impacto $5,495. No hay margen de seguridad frente al 0.125%.
 
 ### 5. ¿El desempeño difiere de forma significativa entre regímenes?
 
-En test, las operaciones abiertas en crisis ganaron 16.7% de las veces con P&L de −$61,204 y las de reversión 41.7% con −$20,200; tendencia quedó apagada. La prueba de Kruskal-Wallis sobre el retorno por operación (train y test) da H = 1.57 y p = 0.456, así que la diferencia no es significativa. La capa de régimen aporta control de exposición: apagó la estrategia en tendencia durante 34% del tiempo de test y cerró posiciones en cada transición, y muestra que la lógica contraria pierde más en crisis.
+En validation, crisis abrió 24 operaciones (win rate 41.7%, P&L −$49,630), reversión 10 (20.0%, −$20,289) y tendencia quedó apagada durante el 46% del tiempo. La prueba de Kruskal-Wallis sobre el retorno por operación (walk-forward y validation) da H = 0.36 y p = 0.835: la diferencia no es significativa. La capa de régimen aporta control de exposición: apaga la estrategia en tendencia y cierra posiciones en cada transición.
 
 ### 6. Tres limitaciones para operar con capital real
 
-1. La ventaja no sobrevive fuera de muestra: el walk-forward muestra que la optimización ajusta ruido de cada mes.
-2. Seis meses de entrenamiento con velas de 5 minutos cubren pocos episodios de cada régimen; la separación de K-means queda en el límite (silhouette 0.40 en train, 0.37 en test).
-3. Los datos provienen de un tercero (Binance Stocks) y la estrategia opera 100% del capital en un solo activo, sin diversificación.
+1. La ventaja no sobrevive fuera de muestra: walk-forward efficiency de −0.82 y validation negativo.
+2. Nueve meses de velas de 5 minutos dejan pocos episodios por régimen y el optimizador encuentra picos aislados.
+3. Los datos provienen de un tercero (Binance Stocks) y la estrategia concentra el capital en un solo activo.
 
-Advertencia de interpretación: el backtest asume ejecución completa al precio de apertura o al nivel del stop y del take-profit, sin impacto de mercado ni fallas de ejecución. Una orden de $1,000,000 equivale a unas 4,973 acciones, alrededor de 0.41% del volumen de una vela típica de 5 minutos (1.23 millones de acciones). Con un spread de 1 a 2 centavos sobre un precio cercano a $200 y un impacto de 1 a 2 puntos base por lado, las 24 operaciones de test costarían entre 0.05% y 0.10% adicional del capital; los stops disparados por huecos se ejecutan peor de lo modelado.
+Advertencia de interpretación: el backtest incluye comisión, spread e impacto de raíz cuadrada, pero asume ejecución completa sin fallas. Una orden de $1,000,000 equivale a unas 4,973 acciones, alrededor de 0.41% del volumen de una vela típica de 5 minutos. El modelo de impacto estima unos 2 puntos base por lado ($5,495 en las 34 operaciones de validation); un impacto temporal mayor en velas de poco volumen o stops disparados por huecos se ejecutarían peor de lo modelado.
 
 ## Uso de inteligencia artificial
 
-Se utilizó asistencia de IA (Claude) para: estructurar el proyecto según lo especificado, implementar el motor de backtesting, la optimización con Optuna, el walk-forward y la detección de régimen, escribir las pruebas y las figuras, y organizar este README. La estrategia de indicadores fue propuesta por el equipo. Todo el código y los resultados numéricos fueron revisados y ejecutados por los integrantes, quienes son responsables de explicar cualquier parte del proyecto entregado.
+Se utilizó asistencia de IA (Claude) para: estructurar el proyecto según lo especificado, implementar el motor de backtesting con costos, la optimización con Optuna (random search y TPE), el walk-forward, la validación con θ* congelado y la detección de régimen, escribir las pruebas y las figuras, y organizar este README. La estrategia de indicadores fue propuesta por el equipo. Todo el código y los resultados numéricos fueron revisados y ejecutados por los integrantes, quienes son responsables de explicar cualquier parte del proyecto entregado.
