@@ -67,7 +67,7 @@ Para ejecutar las pruebas automáticas:
 python -m pytest -v
 ```
 
-Los datos ya están congelados en `data/nvda_5m.csv`. Para volver a descargarlos (misma interfaz que `yf.download`):
+Los datos ya están congelados en `data/nvda_5m.csv`. Para volver a descargarlos:
 
 ```bash
 python -m src.data --ticker NVDA --start 2026-01-01 --end 2026-09-26 --interval 5m
@@ -86,7 +86,7 @@ La semilla aleatoria utilizada es `42`, definida en `main.py` y en `src/optimize
 | Test | 1 de julio a 25 de septiembre de 2026 (4,758 velas) |
 | Auditoría | 0 duplicados, 0 nulos, 0 velas con OHLC incoherente, 0 días incompletos |
 
-Yahoo Finance solo conserva 60 días de velas de 5 minutos, por eso la descarga usa el histórico de Binance Stocks con la misma interfaz que `yf.download`.
+Yahoo Finance solo conserva 60 días de velas de 5 minutos, por eso la descarga usa el histórico de Binance Stocks.
 
 ## Estrategia
 

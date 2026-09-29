@@ -22,7 +22,7 @@ FIN_TRAIN = "2026-06-30"
 
 def descargar(ticker: str = "NVDA", start: str = "2026-01-01", end: str = "2026-09-26",
               interval: str = "5m", pausa: float = 0.3) -> pd.DataFrame:
-    """Descarga velas OHLCV con la misma interfaz y el mismo formato que yf.download.
+    """Descarga velas OHLCV de un ticker entre start y end.
 
     Yahoo Finance solo guarda 60 días de velas de 5 minutos, así que se usa el histórico
     público de Binance Stocks (precios ajustados). Pagina hacia atrás de 1000 en 1000 velas.
