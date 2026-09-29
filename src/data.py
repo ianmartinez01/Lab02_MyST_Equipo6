@@ -92,3 +92,15 @@ def separar_train_test(df: pd.DataFrame, fin_train: str = FIN_TRAIN) -> tuple[pd
     """Separa por fecha: train hasta `fin_train` inclusive, test desde el día siguiente."""
     corte = pd.Timestamp(fin_train, tz=ZONA) + pd.Timedelta(days=1)
     return df[df.index < corte], df[df.index >= corte]
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Descarga y congela las velas de NVDA a 5 min en data/.")
+    parser.add_argument("--hasta", default="2026-09-26", help="fecha de corte exclusiva (hora de Nueva York)")
+    args = parser.parse_args()
+    ruta = congelar_datos(hasta=args.hasta)
+    print(f"Datos guardados en {ruta}")
+    for clave, valor in auditar_datos(cargar_datos(ruta)).items():
+        print(f"  {clave}: {valor}")
