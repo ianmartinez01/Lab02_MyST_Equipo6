@@ -21,3 +21,8 @@ def test_tabla_retornos_mensual():
 
 def test_win_rate():
     assert win_rate(pd.DataFrame({"pnl": [5.0, -2.0, 1.0, -1.0]})) == 0.5
+
+
+def test_payoff_ratio():
+    from src.metrics import payoff_ratio
+    assert payoff_ratio(pd.DataFrame({"pnl": [6.0, 2.0, -1.0, -3.0]})) == pytest.approx(4.0 / 2.0)

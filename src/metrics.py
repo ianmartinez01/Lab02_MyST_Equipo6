@@ -6,6 +6,7 @@ Convenciones declaradas:
 - Rendimiento anualizado compuesto: (V_final / V_inicial)^(velas_por_año / n) − 1.
 - Calmar = rendimiento anualizado / |máximo drawdown|.
 - Win Rate = operaciones con P&L neto de comisiones > 0 entre el total de operaciones cerradas.
+- Payoff ratio = ganancia media de las operaciones ganadoras / |pérdida media de las perdedoras|.
 """
 
 import numpy as np
@@ -56,6 +57,22 @@ def calmar(valor: pd.Series, velas_por_anio: int = VELAS_POR_ANIO) -> float:
     return np.nan if mdd == 0 else rendimiento_anualizado(valor, velas_por_anio) / mdd
 
 
+def volatilidad_anualizada(valor: pd.Series, velas_por_anio: int = VELAS_POR_ANIO) -> float:
+    """σ(r) · √(velas por año)."""
+    return float(retornos(valor).std() * np.sqrt(velas_por_anio))
+
+
+def payoff_ratio(operaciones: pd.DataFrame) -> float:
+    """Ganancia media de las ganadoras entre la pérdida media (en valor absoluto) de las perdedoras."""
+    if operaciones.empty or "pnl" not in operaciones:
+        return np.nan
+    pnl = operaciones["pnl"].dropna()
+    ganan, pierden = pnl[pnl > 0], pnl[pnl < 0]
+    if ganan.empty or pierden.empty:
+        return np.nan
+    return float(ganan.mean() / abs(pierden.mean()))
+
+
 def win_rate(operaciones: pd.DataFrame) -> float:
     """Proporción de operaciones cerradas con P&L neto positivo."""
     if operaciones.empty or "pnl" not in operaciones:
@@ -65,15 +82,17 @@ def win_rate(operaciones: pd.DataFrame) -> float:
 
 
 def resumen_metricas(valor: pd.Series, operaciones: pd.DataFrame) -> dict:
-    """Las cinco métricas obligatorias más el retorno total y el número de operaciones."""
+    """Métricas obligatorias más retorno, volatilidad, payoff y número de operaciones."""
     return {
         "retorno_total": valor.iloc[-1] / valor.iloc[0] - 1,
         "rendimiento_anualizado": rendimiento_anualizado(valor),
+        "volatilidad": volatilidad_anualizada(valor),
         "sharpe": sharpe(valor),
         "sortino": sortino(valor),
         "calmar": calmar(valor),
         "max_drawdown": max_drawdown(valor),
         "win_rate": win_rate(operaciones),
+        "payoff": payoff_ratio(operaciones),
         "operaciones": int(len(operaciones)),
     }
 
