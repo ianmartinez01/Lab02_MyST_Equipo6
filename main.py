@@ -1,77 +1,87 @@
-"""Ejecuta el proyecto completo: python main.py
+"""Ejecuta el laboratorio completo: python main.py"""
 
-Flujo: datos → señales → backtest → métricas, en train y en test.
-Las etapas de régimen, optimización walk-forward y figuras se agregan al integrar sus módulos.
-"""
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from src.backtest import COMISION, ejecutar_backtest
+from src.backtest import ejecutar_backtest
 from src.data import RUTA_CRUDOS, auditar_datos, cargar_datos, congelar_datos, separar_train_test
 from src.metrics import resumen_metricas, tablas_retornos
-from src.signals import PARAMETROS_BASE, generar_senales
+from src.plots import plot_indicadores, plot_operaciones, plot_valor_drawdown
+from src.signals import MODOS, generar_senales
 
-SEMILLA = 42
+SEED = 42
+FIGURES_DIR = Path("docs/figures")
+DIA_EJEMPLO = "2026-03-16"
 
 
-def titulo(texto: str):
-    print(f"\n{'=' * 70}\n{texto}\n{'=' * 70}")
+def buy_and_hold(datos, capital=1_000_000):
+    return datos["Close"] / datos["Close"].iloc[0] * capital
 
 
 def main():
-    np.random.seed(SEMILLA)
+    np.random.seed(SEED)
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     pd.set_option("display.width", 140)
-    pd.set_option("display.max_columns", 20)
 
-    titulo("PASO 1 · Datos: NVDA velas de 5 min, sesión regular 09:30–16:00 ET")
+    print("1. Cargando datos de NVDA (5 min, sesión regular)...")
     if not RUTA_CRUDOS.exists():
-        print("No existe data/nvda_5m.csv: descargando…")
+        print("   No existe data/nvda_5m.csv: descargando...")
         congelar_datos()
     datos = cargar_datos()
-    for clave, valor in auditar_datos(datos).items():
-        print(f"  {clave}: {valor}")
+    auditoria = auditar_datos(datos)
+    print(f"   {auditoria['velas']} velas en {auditoria['dias']} días, de {auditoria['inicio']} a {auditoria['fin']}")
+    print(f"   Duplicados: {auditoria['duplicados']}, nulos: {auditoria['nulos']}, "
+          f"OHLC incoherente: {auditoria['ohlc_incoherente']}")
     train, test = separar_train_test(datos)
-    print(f"  train: {train.index[0]:%Y-%m-%d} a {train.index[-1]:%Y-%m-%d} ({len(train)} velas)")
-    print(f"  test : {test.index[0]:%Y-%m-%d} a {test.index[-1]:%Y-%m-%d} ({len(test)} velas)")
+    print(f"   Train: {len(train)} velas · Test: {len(test)} velas")
 
-    titulo("PASO 2 · Señales: 3 votos (Bollinger, RSI/Estocástico, MACD) + gatillo EMA 9")
-    print("  Compra si ≥ 2 de 3 votos marcan sobreventa y el precio cruza arriba de la EMA 9.")
-    print("  Venta (corto) si ≥ 2 de 3 marcan sobrecompra y el precio cruza abajo de la EMA 9.")
-    print(f"  Parámetros: {PARAMETROS_BASE}")
-    senales = {nombre: generar_senales(tramo) for nombre, tramo in (("train", train), ("test", test))}
-    for nombre, s in senales.items():
-        print(f"  {nombre}: {int((s['senal'] == 1).sum())} señales de compra, "
-              f"{int((s['senal'] == -1).sum())} de venta en {len(s)} velas")
-    ejemplo = senales["train"][senales["train"]["senal"] != 0].head(3)
-    print("\n  Primeras señales en train (lo que vio el modelo al cierre de la vela):")
-    print(ejemplo[["Close", "bb_low", "bb_high", "rsi_14", "stoch_k", "macd_atr", "ema_9",
-                   "volatilidad", "momento", "tendencia", "senal"]].round(2).to_string())
+    print("\n2. Generando señales (2 de 3 votos + gatillo EMA 9)...")
+    senales = {"train": generar_senales(train), "test": generar_senales(test)}
+    conteo = pd.DataFrame({
+        modo: generar_senales(train, modo=modo)["senal"].value_counts().reindex([1, -1], fill_value=0)
+        for modo in MODOS
+    }).rename(index={1: "compras", -1: "ventas"})
+    print("   Señales en train por regla:")
+    print("   " + conteo.to_string().replace("\n", "\n   "))
 
-    titulo(f"PASO 3 · Backtest: $1,000,000, comisión {COMISION:.3%} por lado, SL 1.5 ATR, TP 2 ATR")
-    print("  La orden entra en la apertura de la vela siguiente; todo se cierra al final del día.")
-    filas, resultados = {}, {}
-    for nombre, s in senales.items():
-        r = ejecutar_backtest(s)
-        resultados[nombre] = r
-        ops = r["operaciones"]
-        print(f"\n  {nombre}: {len(ops)} operaciones · valor final ${r['valor'].iloc[-1]:,.0f} · "
-              f"comisiones pagadas ${r['portafolio'].costos:,.0f}")
-        print("  Motivos de salida:", ops["motivo"].value_counts().to_dict())
-        vista = ops.head(5).assign(direccion=ops["direccion"].map({1: "compra", -1: "venta"}))
-        print(vista[["direccion", "entrada", "precio_entrada", "salida", "precio_salida", "motivo", "pnl"]]
-              .round({"precio_entrada": 2, "precio_salida": 2, "pnl": 2}).to_string(index=False))
-
-    titulo("PASO 4 · Métricas")
+    print("\n3. Ejecutando backtest ($1,000,000, comisión 0.125%, SL 1.5 ATR, TP 2 ATR)...")
+    resultados = {nombre: ejecutar_backtest(s) for nombre, s in senales.items()}
     for nombre, r in resultados.items():
-        filas[nombre] = resumen_metricas(r["valor"], r["operaciones"])
-        filas[f"buy&hold {nombre}"] = resumen_metricas(senales[nombre]["Close"] / senales[nombre]["Close"].iloc[0] * 1e6,
-                                                       pd.DataFrame())
-        mensual = tablas_retornos(r["valor"])["mensual"]
+        ops = r["operaciones"]
+        print(f"   {nombre.capitalize()}: {len(ops)} operaciones, valor final ${r['valor'].iloc[-1]:,.2f}, "
+              f"comisiones ${r['portafolio'].costos:,.2f}")
+
+    print("\n4. Calculando métricas...")
+    metricas = {}
+    for nombre, r in resultados.items():
+        metricas[nombre] = resumen_metricas(r["valor"], r["operaciones"])
+        metricas[f"buy&hold {nombre}"] = resumen_metricas(buy_and_hold(senales[nombre]), pd.DataFrame())
+    print("   " + pd.DataFrame(metricas).round(4).to_string().replace("\n", "\n   "))
+    for nombre, r in resultados.items():
+        mensual = tablas_retornos(r["valor"])["mensual"] * 100
         mensual.index = mensual.index.strftime("%Y-%m")
-        print(f"\n  Retornos mensuales {nombre} (%): {(mensual * 100).round(2).to_dict()}")
-    print()
-    print(pd.DataFrame(filas).round(4).to_string())
+        print(f"   Retornos mensuales {nombre} (%): {mensual.round(2).to_dict()}")
+
+    print("\n5. Generando figuras...")
+    figures = {
+        "01_indicadores.png": plot_indicadores(
+            senales["train"].loc[DIA_EJEMPLO], titulo=f"NVDA {DIA_EJEMPLO}: indicadores de la estrategia"),
+        "02_operaciones.png": plot_operaciones(
+            senales["train"].loc[DIA_EJEMPLO], resultados["train"]["operaciones"],
+            titulo=f"NVDA {DIA_EJEMPLO}: señales y operaciones del modelo"),
+        "03_valor_drawdown.png": plot_valor_drawdown(
+            {nombre: (r["valor"], buy_and_hold(senales[nombre])) for nombre, r in resultados.items()},
+            titulo="Valor del portafolio con parámetros base vs buy & hold"),
+    }
+    for filename, fig in figures.items():
+        fig.savefig(FIGURES_DIR / filename, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    print(f"   Figuras guardadas en: {FIGURES_DIR}")
+    print("\nProyecto ejecutado correctamente.")
 
 
 if __name__ == "__main__":
