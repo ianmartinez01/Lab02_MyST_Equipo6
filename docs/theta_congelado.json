@@ -1,0 +1,56 @@
+{
+  "entrenado_hasta": "2026-07-31 15:55:00-04:00",
+  "mes_de_optimizacion_desde": "2026-06-30 15:55:00-04:00",
+  "parametros": {
+    "tendencia": null,
+    "reversion": {
+      "bb_n": 21,
+      "bb_k": 1.8772592108688184,
+      "rsi_bajo": 27,
+      "sto_bajo": 21,
+      "macd_umbral": 0.5001762090860643,
+      "ema_n": 11,
+      "memoria": 10,
+      "sl_atr": 3.722252683139751,
+      "tp_atr": 7.1802563724180954,
+      "fraccion": 0.5787564041237127,
+      "enfriamiento": 21,
+      "rsi_alto": 73,
+      "sto_alto": 79
+    },
+    "crisis": {
+      "bb_n": 16,
+      "bb_k": 1.5259926182980288,
+      "rsi_bajo": 27,
+      "sto_bajo": 16,
+      "macd_umbral": 0.8375031994562755,
+      "ema_n": 5,
+      "memoria": 12,
+      "sl_atr": 2.2968678215502902,
+      "tp_atr": 7.813294718447659,
+      "fraccion": 0.5864996199663625,
+      "enfriamiento": 23,
+      "rsi_alto": 73,
+      "sto_alto": 84
+    }
+  },
+  "centros_kmeans": [
+    [
+      0.290694,
+      -1.078612
+    ],
+    [
+      -1.265132,
+      0.441218
+    ],
+    [
+      0.580651,
+      0.664926
+    ]
+  ],
+  "nombres_grupos": {
+    "1": "tendencia",
+    "0": "reversion",
+    "2": "crisis"
+  }
+}
