@@ -59,7 +59,7 @@ Para ejecutar el proyecto completo (datos, regímenes, walk-forward, modelo fina
 python main.py
 ```
 
-El walk-forward corre en paralelo en todos los núcleos disponibles y tarda alrededor de 10 minutos. Las figuras se guardan en `docs/figures/` y las tablas en `resultados/`.
+El walk-forward corre en paralelo en todos los núcleos disponibles y el proyecto completo tarda entre 7 y 12 minutos según la carga de la máquina. Las figuras se guardan en `docs/figures/` y las tablas en `resultados/`.
 
 Para ejecutar las pruebas automáticas:
 
@@ -136,7 +136,7 @@ K-means (k = 3) sobre ln(volatilidad realizada) y √(eficiencia de Kaufman), ca
 | Régimen apagado | Si su mejor Calmar en la ventana no es positivo, no se opera en ese régimen |
 | Ventanas | 21 (entrenamiento 1 mes, prueba 1 semana, paso semanal) |
 | Configuraciones evaluadas | 8,700 |
-| Tiempo de optimización | 522 s en paralelo (8 núcleos) |
+| Tiempo de optimización | 370 s en paralelo (8 núcleos) |
 | Modelo final | K-means con todo train y Optuna por régimen en junio; se evalúa sin cambios en test |
 
 ## Resultados
