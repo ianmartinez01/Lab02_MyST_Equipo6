@@ -71,7 +71,7 @@ def stochastic(df: pd.DataFrame, window: int = 14, smooth: int = 3):
 
 def calcular_indicadores(df: pd.DataFrame, p: dict) -> pd.DataFrame:
     """Agrega al OHLC los indicadores de la estrategia y el MACD normalizado por ATR."""
-    out = df[["Open", "High", "Low", "Close"]].copy()
+    out = df[["Open", "High", "Low", "Close"] + (["Volume"] if "Volume" in df else [])].copy()
     out["ema_9"] = ema(df, p["ema_n"])
     out = out.join(bollinger(df, p["bb_n"], p["bb_k"]))
     out["atr_14"] = atr(df, p["atr_n"])
