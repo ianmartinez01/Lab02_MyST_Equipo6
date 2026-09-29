@@ -17,7 +17,8 @@ INTERVALOS = {"1m": "1T", "5m": "5T", "1h": "1H", "4h": "4H", "1d": "1D"}
 RUTA_CRUDOS = Path(__file__).resolve().parents[1] / "data" / "nvda_5m.csv"
 ZONA = "America/New_York"
 INICIO_RTH, FIN_RTH = "09:30", "15:55"   # última vela de 5 min abre a las 15:55
-FIN_TRAIN = "2026-06-30"
+FIN_TRAIN = "2026-05-29"
+FIN_TEST = "2026-07-31"
 
 
 def descargar(ticker: str = "NVDA", start: str = "2026-01-01", end: str = "2026-09-26",
@@ -90,6 +91,14 @@ def separar_train_test(df: pd.DataFrame, fin_train: str = FIN_TRAIN) -> tuple[pd
     return df[df.index < corte], df[df.index >= corte]
 
 
+def separar_train_test_validacion(df: pd.DataFrame, fin_train: str = FIN_TRAIN,
+                                  fin_test: str = FIN_TEST) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Tres periodos cronológicos sin mezclar: train (≈ 55%), test (≈ 23%) y validation (≈ 22%)."""
+    train, resto = separar_train_test(df, fin_train)
+    test, validacion = separar_train_test(resto, fin_test)
+    return train, test, validacion
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -103,3 +112,4 @@ if __name__ == "__main__":
     print(f"Datos guardados en {ruta}")
     for clave, valor in auditar_datos(cargar_datos(ruta)).items():
         print(f"  {clave}: {valor}")
+
