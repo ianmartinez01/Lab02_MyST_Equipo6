@@ -52,10 +52,12 @@ class Portafolio:
 
 def ejecutar_backtest(datos: pd.DataFrame, sl_atr: float = 1.5, tp_atr: float = 2.0, fraccion: float = 1.0,
                       comision: float = COMISION, capital: float = CAPITAL_INICIAL,
-                      velas_sin_entrada: int = 3, enfriamiento: int = 0) -> dict:
+                      velas_sin_entrada: int = 3, enfriamiento: int = 0, max_por_dia: int = 99) -> dict:
     """Recorre las velas una por una. `datos` requiere Open, High, Low, Close, atr_14 y senal.
 
     Si trae la columna `regimen`, una posición abierta se cierra en la apertura siguiente al cambio.
+    Si trae columnas `sl_atr`, `tp_atr`, `fraccion` o `enfriamiento`, se usan los valores de la vela
+    de la señal en lugar de los argumentos (parámetros distintos por régimen).
     Devuelve la curva de valor, la tabla de operaciones y el estado final del portafolio.
     """
     if not 0 < fraccion <= 1:
@@ -63,6 +65,11 @@ def ejecutar_backtest(datos: pd.DataFrame, sl_atr: float = 1.5, tp_atr: float = 
     o, h, l, c = (datos[k].to_numpy() for k in ("Open", "High", "Low", "Close"))
     atr, senal = datos["atr_14"].to_numpy(), datos["senal"].to_numpy()
     regimen = datos["regimen"].to_numpy() if "regimen" in datos else None
+    por_vela = {k: (datos[k].to_numpy() if k in datos else np.full(len(datos), v))
+                for k, v in (("sl_atr", sl_atr), ("tp_atr", tp_atr), ("fraccion", fraccion),
+                             ("enfriamiento", enfriamiento))}
+    if np.any(por_vela["fraccion"] > 1) or np.any(por_vela["fraccion"] <= 0):
+        raise ValueError("fraccion debe estar en (0, 1]: no se permite apalancamiento")
     fechas = datos.index
     dia = np.asarray(fechas.date)
     ultima = np.r_[dia[1:] != dia[:-1], True]
@@ -72,9 +79,12 @@ def ejecutar_backtest(datos: pd.DataFrame, sl_atr: float = 1.5, tp_atr: float = 
     port = Portafolio(efectivo=capital)
     valor = np.empty(len(datos))
     bloqueo = {1: -1, -1: -1}
+    abiertas_hoy = 0
 
     for t in range(len(datos)):
         d = int(np.sign(port.acciones))
+        if t == 0 or dia[t] != dia[t - 1]:
+            abiertas_hoy = 0
         # 1) Órdenes decididas al cierre de t-1, ejecutadas en la apertura de t.
         if t > 0 and not ultima[t - 1]:
             s = senal[t - 1]
@@ -83,10 +93,16 @@ def ejecutar_backtest(datos: pd.DataFrame, sl_atr: float = 1.5, tp_atr: float = 
                 port.cerrar(o[t], comision, fechas[t], "cambio de régimen" if cambio_regimen else "señal contraria")
                 d = 0
             permitido = velas_sin_entrada <= pos_en_dia[t] < velas_dia[t] - velas_sin_entrada
-            if d == 0 and s != 0 and permitido and t > bloqueo[s] and np.isfinite(atr[t - 1]):
-                monto = fraccion * port.valor(o[t])
+            permitido = permitido and abiertas_hoy < max_por_dia and t > bloqueo.get(s, -1)
+            if d == 0 and s != 0 and permitido and np.isfinite(atr[t - 1]):
+                monto = por_vela["fraccion"][t - 1] * port.valor(o[t])
                 port.abrir(s, o[t], monto, comision, fechas[t],
-                           sl=o[t] - s * sl_atr * atr[t - 1], tp=o[t] + s * tp_atr * atr[t - 1])
+                           sl=o[t] - s * por_vela["sl_atr"][t - 1] * atr[t - 1],
+                           tp=o[t] + s * por_vela["tp_atr"][t - 1] * atr[t - 1])
+                port.operaciones[-1]["enfriamiento"] = int(por_vela["enfriamiento"][t - 1])
+                if regimen is not None:
+                    port.operaciones[-1]["regimen"] = regimen[t - 1]
+                abiertas_hoy += 1
                 d = s
         # 2) Stop-loss y take-profit dentro de la vela t (stop-loss primero).
         if d != 0:
@@ -96,7 +112,7 @@ def ejecutar_backtest(datos: pd.DataFrame, sl_atr: float = 1.5, tp_atr: float = 
             if toca_sl:
                 precio = min(o[t], op["sl"]) if d == 1 else max(o[t], op["sl"])
                 port.cerrar(precio, comision, fechas[t], "stop-loss")
-                bloqueo[d] = t + enfriamiento
+                bloqueo[d] = t + op["enfriamiento"]
                 d = 0
             elif toca_tp:
                 precio = max(o[t], op["tp"]) if d == 1 else min(o[t], op["tp"])
