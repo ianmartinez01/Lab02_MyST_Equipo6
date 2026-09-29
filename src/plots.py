@@ -256,3 +256,97 @@ def plot_walk_forward(resumen, titulo="Calmar dentro y fuera de muestra por vent
     ax.legend()
     fig.tight_layout()
     return fig
+
+
+def _valores(estudio, penalizacion=-10.0):
+    trials = [t for t in estudio.trials if t.value is not None]
+    x = np.array([t.number for t in trials])
+    y = np.array([t.value for t in trials])
+    return x, y, y > penalizacion
+
+
+def plot_historia(finales, titulo="Historia de optimización: random search contra TPE"):
+    """`finales` = {regimen: (estudio_random, estudio_tpe)}; valor por trial y mejor acumulado."""
+    fig, ax = plt.subplots(1, len(finales), figsize=(7 * len(finales), 4.8), squeeze=False)
+    for eje, (regimen, (aleatorio, tpe)) in zip(ax[0], finales.items()):
+        for estudio, color, nombre in ((aleatorio, COLOR_BANDA, "Random search"), (tpe, "#1f77b4", "TPE")):
+            x, y, ok = _valores(estudio)
+            eje.scatter(x[ok], y[ok], s=10, color=color, alpha=0.5, label=f"{nombre} (N = {len(x)})")
+            mejor = np.maximum.accumulate(np.where(ok, y, -np.inf))
+            eje.plot(x, mejor, color=color, linewidth=2, label=f"Mejor acumulado {nombre}")
+        eje.set_title(f"Régimen {NOMBRE_REGIMEN[regimen]}")
+        eje.set_xlabel("Trial")
+        eje.set_ylabel("Calmar (trials con operaciones suficientes)")
+        eje.legend(fontsize=8)
+    fig.suptitle(titulo)
+    fig.tight_layout()
+    return fig
+
+
+def plot_importancia(importancias, titulo="Importancia de parámetros en el TPE (fANOVA)"):
+    """`importancias` = {regimen: Series}."""
+    fig, ax = plt.subplots(1, len(importancias), figsize=(6.5 * len(importancias), 4.8), squeeze=False)
+    for eje, (regimen, imp) in zip(ax[0], importancias.items()):
+        imp = imp.sort_values()
+        eje.barh(imp.index, imp.to_numpy(), color=COLORES_REGIMEN[regimen], label="Importancia")
+        eje.set_title(f"Régimen {NOMBRE_REGIMEN[regimen]}")
+        eje.set_xlabel("Proporción de la varianza del Calmar explicada")
+        eje.set_ylabel("Parámetro")
+        eje.legend(loc="lower right")
+    fig.suptitle(titulo)
+    fig.tight_layout()
+    return fig
+
+
+def plot_slices(estudio, elegido, regimen, titulo=None):
+    """Valor de cada parámetro contra el Calmar de cada trial del TPE; marca argmax y θ* de meseta."""
+    trials = [t for t in estudio.trials if t.value is not None and t.value > -10]
+    nombres = list(estudio.best_params)
+    columnas = 4
+    filas = int(np.ceil(len(nombres) / columnas))
+    fig, ax = plt.subplots(filas, columnas, figsize=(16, 3.4 * filas), squeeze=False)
+    for eje, nombre in zip(ax.flat, nombres):
+        eje.scatter([t.params[nombre] for t in trials], [t.value for t in trials], s=12, alpha=0.5,
+                    color="#1f77b4", label="Trial")
+        eje.axvline(estudio.best_params[nombre], color=COLOR_VENTA, linestyle="--", label="Argmax")
+        eje.axvline(elegido[nombre], color=COLOR_COMPRA, linewidth=2, label="θ* (meseta)")
+        eje.set_xlabel(nombre)
+        eje.set_ylabel("Calmar")
+    for eje in list(ax.flat)[len(nombres):]:
+        eje.axis("off")
+    ax.flat[0].legend(fontsize=8)
+    fig.suptitle(titulo or f"Slice plots del TPE, régimen {NOMBRE_REGIMEN[regimen]}")
+    fig.tight_layout()
+    return fig
+
+
+def plot_superficie(sup, regimen, titulo=None):
+    """Superficie 3D del Calmar en los dos parámetros más importantes, resto fijo en el mejor
+    punto del random search."""
+    fig = plt.figure(figsize=(10, 7))
+    ax = fig.add_subplot(projection="3d")
+    X, Y = np.meshgrid(sup["x"], sup["y"])
+    Z = np.ma.masked_invalid(sup["z"])
+    superficie = ax.plot_surface(X, Y, Z, cmap="viridis", edgecolor="none", alpha=0.9)
+    fig.colorbar(superficie, ax=ax, shrink=0.6, label="Calmar")
+    ax.set_xlabel(sup["ejes"][0])
+    ax.set_ylabel(sup["ejes"][1])
+    ax.set_zlabel("Calmar")
+    ax.set_title(titulo or f"Calmar en función de {sup['ejes'][0]} y {sup['ejes'][1]} "
+                           f"(régimen {NOMBRE_REGIMEN[regimen]}; resto de θ en el mejor random search)")
+    return fig
+
+
+def plot_anchored_rolling(curvas, benchmark, titulo="Walk-forward fuera de muestra: anchored contra rolling"):
+    """`curvas` = {nombre: (valor, eficiencia)}."""
+    fig, ax = plt.subplots(figsize=(15, 5))
+    for (nombre, (valor, eficiencia)), color in zip(curvas.items(), ["#1f77b4", "#9467bd"]):
+        ax.plot(valor.index, valor, color=color, label=f"{nombre} (WFE = {eficiencia:.2f})")
+    ax.plot(benchmark.index, benchmark, color=COLOR_EMA, linestyle=":", label="Buy & hold")
+    ax.set_title(titulo)
+    ax.set_xlabel("Fecha")
+    ax.set_ylabel("Valor (USD)")
+    ax.legend(loc="upper left")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%b"))
+    fig.tight_layout()
+    return fig
