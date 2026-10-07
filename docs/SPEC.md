@@ -36,7 +36,7 @@ De ahí salen dos decisiones de diseño:
 | Posición en el rango del día | (Close − mínimo) / (máximo − mínimo) de la sesión | Momento | Compra nocturna |
 | RSI | 14 | Momento | Compra nocturna |
 
-Todos se calculan con `ta` salvo el VWAP de sesión (Σ precio típico · volumen / Σ volumen desde las 09:30) y la posición en el rango del día, que funciona como un Estocástico de la sesión (`KeltnerChannel`, `RSIIndicator`, `TRIXIndicator`, `AverageTrueRange`). Implementación: `calcular_indicadores()` en `src/signals.py`.
+Keltner, RSI, TRIX y ATR se calculan con `ta` (`KeltnerChannel`, `RSIIndicator`, `TRIXIndicator`, `AverageTrueRange`). El VWAP de sesión (Σ precio típico · volumen / Σ volumen desde las 09:30) y la posición en el rango del día, que funciona como un Estocástico de la sesión, se calculan directamente. Las ventanas de esta tabla son el punto de partida; las finales están en la sección 5. Implementación: `calcular_indicadores()` en `src/signals.py`.
 
 ## 4. Regla de entrada
 
@@ -80,11 +80,21 @@ Los valores de esta sección son el punto de partida de la búsqueda (`PARAMETRO
 1. Ventanas de los indicadores (Keltner, ATR del canal, RSI, TRIX, memoria y días de tendencia): un solo θ para todo train, con la parte de día, 200 pruebas TPE y al menos 30 operaciones (`optimizar_ventanas()`, `RANGOS_VENTANAS`).
 2. Por régimen, con esas ventanas fijas: stop, objetivo, riesgo, umbral del VWAP y tamaño de la compra nocturna (`RANGOS`), 200 pruebas TPE y 200 de random search por régimen.
 
-Las ventanas no se optimizan por régimen: con 3 a 4 operaciones por régimen al mes, en el walk-forward de 1 mes ajustaban ruido. El θ* final queda en `docs/theta_congelado.json`.
+Las ventanas no se optimizan por régimen: con 3 a 4 operaciones por régimen al mes, en el walk-forward de 1 mes ajustaban ruido. El θ* final queda en `docs/theta_congelado.json`:
+
+| Ventanas (etapa 1, todos los regímenes) | Keltner | ATR del canal | RSI | TRIX | Memoria | Días de tendencia |
+|---|---:|---:|---:|---:|---:|---:|
+| θ* | 50 | 26 | 15 | 28 | 15 | 20 |
+
+| Régimen (etapa 2) | Stop (ATR) | Take-profit (ATR) | Riesgo por operación | Umbral VWAP | Tamaño nocturno |
+|---|---:|---:|---:|---:|---:|
+| Tendencia | 7.73 | 7.07 | 0.26% | 0.31% | 98% |
+| Reversión | 3.29 | 8.89 | 0.77% | 0.47% | 27% |
+| Crisis | 2.58 | 21.39 | 0.27% | 0.55% | 97% |
 
 ## 6. Compra nocturna
 
-Complemento de la parte de día: solo actúa al cierre. En train, cuando NVDA cerró la sesión claramente por debajo de su VWAP, la apertura siguiente tendió a rebotar (28 noches con el cierre ≥ 0.5% bajo el VWAP: +30.9 pb netos por noche; comprar todas las noches perdía 10.2 pb por noche).
+Complemento de la parte de día: solo actúa al cierre. Cuando NVDA cierra la sesión castigada, la apertura siguiente tiende a rebotar. Con θ* la compra nocturna ganó 5.98% del capital en 18 noches de train (66.7% ganadoras), 3.80% en 12 noches de test y 1.13% en 10 noches de validation (`resultados/dia_noche.csv`).
 
 Votos al cierre de la vela de las 15:50:
 
@@ -112,13 +122,15 @@ La regla simple (solo n_vol) se reporta como comparación en la tabla de reglas,
 
 ## 7. Sizing
 
-Riesgo fijo por operación: tocar el stop cuesta el 0.5% del equity ($5,000 con $1,000,000).
+Parte de día: riesgo fijo por operación, tocar el stop cuesta `riesgo` del equity (base 0.5%, $5,000 con $1,000,000; θ* entre 0.26% y 0.77% según el régimen).
 
 ```
-acciones = 0.005 · equity / |entrada − stop|,  recortado a equity / (precio · (1 + comisión))
+acciones = riesgo · equity / |entrada − stop|,  recortado a equity / (precio · (1 + comisión))
 ```
 
-Sin apalancamiento: el monto nunca supera el equity. Implementación: `tamano_por_riesgo()` en `src/backtest.py`.
+Compra nocturna: acciones = tamaño nocturno · equity / precio (θ* entre 27% y 98%), con el mismo recorte.
+
+Sin apalancamiento: ninguna posición supera el equity disponible y nunca hay dos posiciones abiertas. Implementación: `tamano_por_riesgo()` y `abrir()` en `src/backtest.py`.
 
 ## 8. Costos
 
@@ -148,4 +160,4 @@ pérdida  L =  6.0 · 0.278% + 0.277% = 1.95%
 p* = L / (W + L) = 28.3%
 ```
 
-La estrategia necesita ganar más del 28.3% de sus operaciones (24.3% sin costos). Con objetivos de 2 ATR y stops de 1.5 ATR haría falta 71.3%: con objetivos lejanos el costo pesa mucho menos. Implementación: `winrate_equilibrio()` en `src/metrics.py`.
+Con la configuración base la estrategia necesita ganar más del 28.3% de sus operaciones (24.3% sin costos); con θ* hace falta 59.0% en tendencia (objetivo cerca y stop lejos), 35.2% en reversión y 14.9% en crisis (objetivo de 21 ATR). Con objetivos de 2 ATR y stops de 1.5 ATR haría falta 71.3%: con objetivos lejanos el costo pesa mucho menos. Implementación: `winrate_equilibrio()` en `src/metrics.py`.

@@ -5,7 +5,8 @@
   todo train y se evalúa fuera de muestra en test y en validation; el walk-forward de 1 mes mide la degradación.
 - Restricción: una configuración con menos de `MIN_OPERACIONES` operaciones abiertas en el régimen dentro de
   la ventana vale −10 en lugar de su Calmar. La estrategia opera unas 10 veces al mes en total, así que el
-  mínimo por régimen y por ventana de 1 mes es 4 (con 10 por régimen ninguna ventana sería factible).
+  mínimo por régimen y por ventana de 1 mes es 4 (con 10 por régimen ninguna ventana sería factible); para θ*
+  final, con los cinco meses de train, el mínimo es MIN_OPERACIONES_FINAL = 10 por régimen.
 - θ* se toma del centro de la mejor meseta (promedio de los k vecinos más cercanos en el espacio
   normalizado de parámetros), no del argmax literal.
 - Si el mejor Calmar de un régimen en la ventana no es positivo, ese régimen queda apagado.
@@ -31,6 +32,7 @@ from src.signals import PARAMETROS_BASE, generar_senales, posicion_objetivo
 N_PRUEBAS = 150
 N_DIAGNOSTICO = 200
 MIN_OPERACIONES = 4
+MIN_OPERACIONES_FINAL = 10
 CALENTAMIENTO = 32 * 78  # 32 sesiones: cubre la media de hasta 30 días de la tendencia diaria
 EMBARGO = 78
 VECINOS_MESETA = 10
@@ -147,7 +149,8 @@ def seleccionar_meseta(estudio, vecinos: int = VECINOS_MESETA, rangos: dict = No
 
 def optimizar_regimen(datos: pd.DataFrame, etiquetas: pd.Series, regimen: str, desde,
                       n_pruebas: int = N_PRUEBAS, semilla: int = SEMILLA, sampler: str = "tpe",
-                      devolver_estudio: bool = False, ventanas: dict | None = None) -> dict:
+                      devolver_estudio: bool = False, ventanas: dict | None = None,
+                      minimo: int = MIN_OPERACIONES) -> dict:
     """Optuna maximizando el Calmar del backtest que solo opera en `regimen`, con las `ventanas` fijas."""
     ventanas = ventanas or {}
     if not (etiquetas.loc[desde:].reindex(datos.loc[desde:].index) == regimen).any():
@@ -159,7 +162,7 @@ def optimizar_regimen(datos: pd.DataFrame, etiquetas: pd.Series, regimen: str, d
         ops = r["operaciones"]
         n = int((ops["regimen"] == regimen).sum()) if len(ops) else 0
         trial.set_user_attr("operaciones", n)
-        if n < MIN_OPERACIONES:
+        if n < minimo:
             return PENALIZACION
         valor = calmar(r["equity"])
         return valor if np.isfinite(valor) else PENALIZACION
@@ -298,7 +301,7 @@ def modelo_final(train: pd.DataFrame, n_pruebas: int = N_DIAGNOSTICO) -> dict:
     tramo = train
     trabajos = [(r, s, SEMILLA + d + i) for i, r in enumerate(REGIMENES) for s, d in (("random", 200), ("tpe", 100))]
     salida = Parallel(n_jobs=len(trabajos))(
-        delayed(optimizar_regimen)(tramo, etiquetas, r, inicio, n_pruebas, semilla, s, True, ventanas)
+        delayed(optimizar_regimen)(tramo, etiquetas, r, inicio, n_pruebas, semilla, s, True, ventanas, MIN_OPERACIONES_FINAL)
         for r, s, semilla in trabajos)
     aleatorio = {r: res for (r, s, _), res in zip(trabajos, salida) if s == "random"}
     tpe = {r: res for (r, s, _), res in zip(trabajos, salida) if s == "tpe"}
@@ -355,7 +358,7 @@ def superficie(final: dict, regimen: str, ejes: tuple, puntos: int = 12) -> dict
             for eje, v in ((ejes[0], x), (ejes[1], y)):
                 p[eje] = int(round(v)) if RANGOS[eje][2] is int else float(v)
             r = backtest_por_regimen(final["tramo"], final["etiquetas"], {regimen: completar(p)}, final["inicio"])
-            Z[i, j] = calmar(r["equity"]) if len(r["operaciones"]) >= MIN_OPERACIONES else np.nan
+            Z[i, j] = calmar(r["equity"]) if len(r["operaciones"]) >= MIN_OPERACIONES_FINAL else np.nan
     return {"x": xs, "y": ys, "z": Z, "ejes": ejes, "base": base}
 
 
