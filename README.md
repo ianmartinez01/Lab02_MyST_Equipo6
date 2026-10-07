@@ -11,7 +11,7 @@ Este proyecto desarrolla una estrategia sistemática sobre NVDA en velas de 5 mi
 ## Estructura del proyecto
 
 ```text
-Lab02_MyST_Equipo6/
+Lab02_MyST_Equipo8/
 ├── README.md
 ├── requirements.txt
 ├── .gitignore

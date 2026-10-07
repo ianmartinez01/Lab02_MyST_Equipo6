@@ -1,6 +1,6 @@
 # SPEC · Estrategia del Lab 02 (NVDA, 5 minutos)
 
-Ian Carlo Escalante Martínez · 731828 · Equipo 6
+Ian Carlo Escalante Martínez · 731828 · Equipo 8
 
 ## 1. Universo y frecuencia
 
