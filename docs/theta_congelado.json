@@ -1,0 +1,72 @@
+{
+  "entrenado_hasta": "2026-05-29 15:55:00-04:00",
+  "mes_de_optimizacion_desde": "2026-02-19 09:30:00-05:00",
+  "ventanas": {
+    "kc_n": 50,
+    "kc_atr": 26,
+    "rsi_n": 15,
+    "trix_n": 28,
+    "memoria": 15,
+    "dias_tendencia": 20
+  },
+  "parametros": {
+    "tendencia": {
+      "kc_n": 50,
+      "kc_atr": 26,
+      "rsi_n": 15,
+      "trix_n": 28,
+      "memoria": 15,
+      "dias_tendencia": 20,
+      "sl_atr": 7.732657837300961,
+      "tp_atr": 7.066533381868024,
+      "riesgo": 0.002554449619345755,
+      "umbral_vwap": 0.003121469126193062,
+      "tamano_noche": 0.9777881292301349
+    },
+    "reversion": {
+      "kc_n": 50,
+      "kc_atr": 26,
+      "rsi_n": 15,
+      "trix_n": 28,
+      "memoria": 15,
+      "dias_tendencia": 20,
+      "sl_atr": 3.2940692337820874,
+      "tp_atr": 8.89019941632679,
+      "riesgo": 0.007688657459749275,
+      "umbral_vwap": 0.004728066369139405,
+      "tamano_noche": 0.27099004892915785
+    },
+    "crisis": {
+      "kc_n": 50,
+      "kc_atr": 26,
+      "rsi_n": 15,
+      "trix_n": 28,
+      "memoria": 15,
+      "dias_tendencia": 20,
+      "sl_atr": 2.584444910340517,
+      "tp_atr": 21.387360991430665,
+      "riesgo": 0.002688819595467858,
+      "umbral_vwap": 0.005514993518009021,
+      "tamano_noche": 0.9671007808185716
+    }
+  },
+  "centros_kmeans": [
+    [
+      0.618199,
+      0.629596
+    ],
+    [
+      0.186542,
+      -1.130903
+    ],
+    [
+      -1.268661,
+      0.359054
+    ]
+  ],
+  "nombres_grupos": {
+    "2": "tendencia",
+    "1": "reversion",
+    "0": "crisis"
+  }
+}
